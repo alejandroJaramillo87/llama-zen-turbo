@@ -1,0 +1,20 @@
+# Build artifacts
+build/
+*.o
+*.so
+*.a
+
+# Editor files
+.vscode/
+*.swp
+*.swo
+*~
+
+# Test artifacts
+*.log
+*.tmp
+/tmp/
+
+# System files
+.DS_Store
+Thumbs.db
