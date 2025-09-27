@@ -6,7 +6,9 @@
  * to reduce TLB pressure during model inference.
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -58,7 +60,7 @@ static void init_functions() {
 }
 
 // Check if we should use huge pages for this file
-static bool should_use_hugepages(int fd, size_t length) {
+static bool should_use_hugepages(int /*fd*/, size_t length) {
 #if ENABLE_HUGEPAGES
     return length >= MIN_SIZE_FOR_HUGEPAGES;
 #else

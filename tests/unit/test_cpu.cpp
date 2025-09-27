@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "../include/test_colors.h"
 
 #ifdef __x86_64__
 #include <cpuid.h>
@@ -28,10 +29,10 @@ bool detect_amd_zen5() {
     memcpy(vendor + 8, &ecx, 4);
     vendor[12] = '\0';
 
-    printf("[test_cpu] CPU vendor: %s\n", vendor);
+    PRINT_INFO("CPU vendor: %s", vendor);
 
     if (strcmp(vendor, "AuthenticAMD") != 0) {
-        printf("[test_cpu] Not an AMD processor\n");
+        PRINT_WARN("Not an AMD processor");
         return false;
     }
 
@@ -55,36 +56,38 @@ bool detect_amd_zen5() {
         display_model = (extended_model << 4) + model;
     }
 
-    printf("[test_cpu] AMD Family: 0x%X, Model: 0x%X\n", display_family, display_model);
+    PRINT_INFO("AMD Family: 0x%X, Model: 0x%X", display_family, display_model);
 
     // Check for Zen 5
     if (display_family == 0x1A) {
-        printf("[test_cpu] AMD Zen 5 detected\n");
+        PRINT_OK("AMD Zen 5 detected");
         return true;
     }
 
-    printf("[test_cpu] Not AMD Zen 5 (Family 26/0x1A required)\n");
+    PRINT_WARN("Not AMD Zen 5 (Family 26/0x1A required)");
     return false;
 #else
-    printf("[test_cpu] Not x86_64 architecture\n");
+    PRINT_WARN("Not x86_64 architecture");
     return false;
 #endif
 }
 
 int main() {
-    printf("[test_cpu] Testing CPU detection logic\n");
+    PRINT_TEST("CPU detection logic");
+    printf("\n");
 
     bool is_zen5 = detect_amd_zen5();
 
     if (is_zen5) {
-        printf("[test_cpu] OK: Running on AMD Zen 5\n");
-        printf("[test_cpu] Library should load successfully\n");
+        PRINT_OK("Running on AMD Zen 5");
+        PRINT_INFO("Library should load successfully");
     } else {
-        printf("[test_cpu] INFO: Not running on AMD Zen 5\n");
-        printf("[test_cpu] Library will refuse to load on this CPU\n");
+        PRINT_INFO("Not running on AMD Zen 5");
+        PRINT_WARN("Library will refuse to load on this CPU");
     }
 
     // This test always passes - it just reports CPU status
-    printf("[test_cpu] OK: CPU detection logic verified\n");
+    PRINT_OK("CPU detection logic verified");
+    printf("\n");
     return 0;
 }

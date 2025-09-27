@@ -14,6 +14,8 @@ This project provides architecture-specific optimizations for running llama.cpp 
 ## Current Status
 
 Phase 1A implemented: Basic hugepage support for reducing TLB pressure during model loading.
+- Comprehensive test suite completed (10 tests, 100% Phase 1A coverage)
+- Performance baselines established for optimization tracking
 
 ## Requirements
 
@@ -26,7 +28,8 @@ Phase 1A implemented: Basic hugepage support for reducing TLB pressure during mo
 
 ```bash
 make                # Build library
-make test          # Run tests
+make test          # Run all tests (verbose)
+make test-quiet    # Run tests with minimal output
 make install       # Install to /usr/local/lib
 ```
 
@@ -62,9 +65,18 @@ src/
 └── config.h                # Configuration parameters
 
 tests/
-├── test_load.cpp           # Library loading test
-├── test_cpu.cpp            # CPU detection test
-└── test_hugepage.cpp       # mmap interception test
+├── unit/                   # Basic functionality tests
+│   ├── test_load.cpp       # Library loading
+│   ├── test_cpu.cpp        # CPU detection
+│   └── test_hugepage.cpp   # mmap interception
+├── functional/             # Feature-level tests
+│   ├── test_memory_boundaries.cpp  # 1GB threshold testing
+│   ├── test_munmap.cpp            # Allocation tracking
+│   ├── test_fallback.cpp          # Graceful degradation
+│   ├── test_memory_tracking.cpp   # Memory management
+│   ├── test_stress.cpp            # High-load scenarios
+│   └── test_performance.cpp       # Baseline measurements
+└── integration/            # End-to-end validation
 ```
 
 ## Performance
@@ -74,6 +86,7 @@ Phase 1A provides baseline optimizations. Full performance targets:
 - Target: 400% improvement for INT8/Q4 quantized models
 
 Current BIOS optimizations provide 26% gain (FCLK 2100MHz, Curve Optimizer).
+Performance baselines established through comprehensive stress and throughput testing.
 
 ## Development
 

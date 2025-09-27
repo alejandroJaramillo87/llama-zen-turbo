@@ -560,6 +560,13 @@ void* complex_allocation(size_t size) {
 
 ## Testing Conventions
 
+### Test Output Standards
+
+All test programs must follow the test output style guide:
+- See `includes/TEST_OUTPUT_STYLE.md` for comprehensive output formatting rules
+- Use consistent status indicators ([OK], [FAIL], [WARN], etc.)
+- Follow Unix philosophy: simple, parseable, exit-code-driven
+
 ### Unit Test Structure
 
 ```cpp

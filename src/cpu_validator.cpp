@@ -45,8 +45,9 @@ bool is_zen5_cpu() {
     // Extract family info
     unsigned int family = (eax >> 8) & 0xF;
     unsigned int extended_family = (eax >> 20) & 0xFF;
-    unsigned int model = (eax >> 4) & 0xF;
-    unsigned int extended_model = (eax >> 16) & 0xF;
+    // Model info not currently used - accepting all Family 26 CPUs as Zen 5
+    // unsigned int model = (eax >> 4) & 0xF;
+    // unsigned int extended_model = (eax >> 16) & 0xF;
 
     // Calculate display family
     unsigned int display_family = family;
@@ -54,11 +55,11 @@ bool is_zen5_cpu() {
         display_family = family + extended_family;
     }
 
-    // Calculate display model
-    unsigned int display_model = model;
-    if (family == 0xF || family == 0x6) {
-        display_model = (extended_model << 4) + model;
-    }
+    // Calculate display model (not used for Zen 5 detection currently)
+    // unsigned int display_model = model;
+    // if (family == 0xF || family == 0x6) {
+    //     display_model = (extended_model << 4) + model;
+    // }
 
     // AMD Zen 5 is Family 26 (0x1A)
     // Models: 0x40-0x4F (Granite Ridge/Ryzen 9000), 0x20-0x2F (Strix Point/Ryzen AI 300)
