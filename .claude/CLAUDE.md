@@ -29,7 +29,7 @@
   - Exit with clear error if not Zen 5
 
   ### Key Optimizations
-  1. **BLIS Integration**: Latest BLIS 1.0+ with Zen 5 kernels
+  1. **AOCL 5.1 BLIS Integration**: AMD AOCL 5.1 (May 2025) with Zen 5 optimized BLIS kernels
   2. **Hugepage Allocation**: From ai-experiments wrapper
   3. **CCX-Aware NUMA**: Dual-CCD optimization
   4. **AVX-512 VNNI**: Direct INT8 computation
@@ -40,6 +40,6 @@
   - Target: 400% improvement for INT8/Q4
 
   ### Important Development Notes
-  - Always use BLIS_ARCH_TYPE=zen5
+  - Using AOCL 5.1 (latest, May 2025) for BLIS implementation
   - Test only on Zen 5 hardware
   - No generic x86 fallbacks
