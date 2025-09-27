@@ -1,0 +1,1 @@
+../../external/ai-experiments/.claude/BASH_OUTPUT_STYLE.md

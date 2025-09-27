@@ -1,0 +1,3 @@
+[submodule "external/ai-experiments"]
+	path = external/ai-experiments
+	url = https://github.com/alejandroJaramillo87/ai-experiments.git
