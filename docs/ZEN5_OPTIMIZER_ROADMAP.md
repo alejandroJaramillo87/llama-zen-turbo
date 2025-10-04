@@ -1,6 +1,25 @@
-# Zen5 LLAMA Optimizer - Project Roadmap
+# Zen 5 LLAMA optimizer project roadmap
 
-## Executive Summary
+## Table of Contents
+
+- [Executive Summary](#executive-summary)
+- [Performance Baseline Clarification](#performance-baseline-clarification)
+- [Technical Foundation](#technical-foundation)
+- [Key Technical Discoveries](#key-technical-discoveries)
+- [Memory Bandwidth Physics](#memory-bandwidth-physics-the-hard-constraint)
+- [Technical Architecture](#technical-architecture)
+- [Implementation Roadmap](#implementation-roadmap)
+  - [Phase 1: Foundation](#phase-1-foundation-weeks-1-4--completed)
+  - [Phase 2: Memory Bandwidth Optimizations](#phase-2-memory-bandwidth-optimizations-weeks-5-8)
+  - [Phase 3: Advanced Memory Optimizations](#phase-3-advanced-memory-optimizations-weeks-9-12)
+  - [Phase 4: VNNI Acceleration](#phase-4-vnni-acceleration-for-quantized-models-weeks-13-16)
+  - [Phase 5: Advanced Compute Optimizations](#phase-5-advanced-compute-optimizations-weeks-17-20)
+- [Performance Projections](#performance-projections)
+- [Technical Validation](#technical-validation)
+- [Dependencies](#dependencies)
+- [Current Status](#current-status)
+
+## Executive summary
 
 ### Mission
 Push AMD Zen 5 CPU and llama.cpp to their theoretical performance limits through systematic optimization, leveraging every architectural feature and instruction set capability available.
@@ -8,13 +27,13 @@ Push AMD Zen 5 CPU and llama.cpp to their theoretical performance limits through
 ### Vision
 Achieve 4-6x performance improvement for llama.cpp inference on AMD Zen 5 processors exclusively, establishing a new standard for CPU-based LLM inference performance.
 
-### Value Proposition
+### Value proposition
 - **For Users**: 4-6x faster inference on existing AMD hardware
 - **For AMD**: Showcase Zen 5's untapped AI capabilities
 - **For Community**: Open-source reference implementation of CPU optimizations
 - **For Industry**: Reduce inference costs by 75% through performance gains
 
-### Current Status
+### Current status
 - **Phase 1A COMPLETED**: Hugepage support implemented with zen5_optimizer library
 - **Test Suite COMPLETED**: Comprehensive test coverage (10 tests, 2,800 lines, 100% Phase 1A feature coverage)
 - **Proven**: 26% performance gain with BIOS optimizations (FCLK 2100MHz, Curve Optimizer, memory timings)
@@ -22,9 +41,43 @@ Achieve 4-6x performance improvement for llama.cpp inference on AMD Zen 5 proces
 - **Discovered**: Multiple optimization opportunities totaling 400%+ potential improvement
 - **Active Development**: Phase 1B AOCL integration in progress
 
-## Technical Foundation
+## Performance baseline clarification
 
-### Existing Assets
+**Important**: This project builds on hardware optimizations to deliver software-level gains.
+
+### Hardware baseline (BIOS optimizations)
+The validated 26% performance improvement comes from BIOS/firmware optimizations:
+- **Original baseline**: 28.09 tokens/second (stock BIOS settings)
+- **Optimized baseline**: 35.44 tokens/second (BIOS optimizations enabled)
+- **Gain**: 26.2% improvement from hardware configuration
+
+**BIOS optimizations include:**
+- FCLK 2100 MHz (Infinity Fabric clock)
+- Conservative Curve Optimizer (-15)
+- CPU Boost +200 MHz
+- C-states disabled
+- Memory power-down disabled
+- DDR5-6000 tuned timings
+
+### Software baseline (this library)
+The zen5_optimizer library **starts from the optimized 35.44 tok/s baseline** and adds:
+- **Phase 1A**: Hugepage support (foundation for memory optimizations)
+- **Phase 1B+**: AOCL BLIS, NUMA, prefetching, VNNI acceleration
+
+**Key Insight**: All projected performance gains in this roadmap are **additive to** the 26% BIOS improvement, not inclusive of it.
+
+### Performance attribution
+```
+Stock llama.cpp: 28 tok/s
+    + BIOS optimizations: +26%
+    = Hardware-optimized: 35 tok/s (SOFTWARE BASELINE)
+    + zen5_optimizer library: phases 1-5
+    = Target performance: 98-330 tok/s (depending on model quantization)
+```
+
+## Technical foundation
+
+### Existing assets
 1. **Working hugepage implementation**
    - Original wrapper: `external/ai-experiments/docker/llama-cpu/hugepage_mmap_wrapper.cpp`
    - New Zen5 optimizer: `src/memory/hugepage_allocator.cpp`
@@ -50,9 +103,9 @@ Achieve 4-6x performance improvement for llama.cpp inference on AMD Zen 5 proces
    - Covers CPU detection, memory boundaries, concurrency, stress scenarios
    - Performance baselines established for optimization tracking
 
-### Hardware Context
+### Hardware context
 
-#### AMD Ryzen 9950X Specifications
+#### AMD Ryzen 9950X specifications
 - **Architecture**: Zen 5 (4nm process)
 - **Cores**: 16 cores / 32 threads
 - **Layout**: 2 CCDs (Core Complex Dies), 8 cores each
@@ -64,14 +117,14 @@ Achieve 4-6x performance improvement for llama.cpp inference on AMD Zen 5 proces
 - **SIMD**: AVX-512 with VNNI support
 - **TDP**: 170W (230W max boost)
 
-#### Why Zen 5 + llama.cpp is Underoptimized
+#### Why Zen 5 + llama.cpp is underoptimized
 1. **llama.cpp prioritizes portability** over platform-specific optimization
-2. **Generic OpenBLAS** doesn't leverage Zen 5's architecture
+2. **Generic OpenBLAS** does not leverage Zen 5 architecture
 3. **No AVX-512 VNNI usage** despite hardware support
 4. **Ignores dual-CCD topology** and NUMA effects
 5. **Standard 4KB pages** cause excessive TLB pressure
 
-### Key Technical Discoveries
+### Key technical discoveries
 
 1. **Memory bandwidth is the bottleneck**
    - System achieves only 9.1% of theoretical bandwidth efficiency
@@ -82,16 +135,50 @@ Achieve 4-6x performance improvement for llama.cpp inference on AMD Zen 5 proces
    - AVX-512 VNNI instructions for INT8/INT4 computation
    - Dual memory controllers (one per CCD)
    - 96MB of combined L3 cache
-   - AOCL 5.1 (May 2025) with Zen 5 optimized BLIS kernels
+   - AOCL 5.1 with Zen 5 optimized BLIS kernels
 
 3. **Quantized models have massive potential**
    - VNNI could provide 2-4x speedup for Q8/Q4 models
    - Direct INT8 computation eliminates dequantization overhead
    - 80% reduction in memory bandwidth requirements
 
-## Technical Architecture
+### Memory bandwidth physics: the hard constraint
 
-### Core Design Philosophy
+**Understanding the 9.1% efficiency and 96GB/s limit:**
+
+```
+For a 30GB FP32 model generating tokens at 35 tok/s:
+
+Theoretical bandwidth needed per token:
+  - Must read entire model: 30GB × 35 tokens/sec = 1,050 GB/s
+
+Available bandwidth (DDR5-6000 dual-channel):
+  - Theoretical maximum: 96 GB/s
+  - Real-world achievable: ~70-80 GB/s
+
+Current efficiency:
+  - Actual usage: ~8.7 GB/s (measured)
+  - Efficiency: 8.7 / 96 = 9.1%
+  - Cache reuse factor: ~11× (each byte read 11 times from cache)
+```
+
+**Why adding more bandwidth is not possible:**
+1. **Physical limit**: DDR5-6000 dual-channel = 96GB/s maximum
+2. **Current bottleneck**: Not bandwidth saturation, but poor cache utilization
+3. **Optimization strategy**: Improve cache hit rate from 91% to 95%+ (doubles effective bandwidth)
+
+**How optimizations overcome the limit:**
+- **Huge pages**: Reduce TLB misses, more L1/L2 TLB hits, fewer page table walks, increases effective bandwidth
+- **Prefetching**: Hide memory latency, overlap compute and memory access, increases throughput
+- **NUMA interleaving**: Use both memory controllers (2×48GB/s), parallel access, increases bandwidth
+- **Compression/VNNI**: Reduce data size (INT8 vs FP32 = 4× smaller), reduces bandwidth requirement
+- **Cache blocking**: Better locality, higher hit rate, less memory traffic
+
+**The key insight**: We're not trying to exceed 96GB/s. We're trying to use it more efficiently by improving cache hit rates from 91% to 95%+, which effectively doubles throughput without needing more bandwidth.
+
+## Technical architecture
+
+### Core design philosophy
 
 1. **Single Unified Wrapper**
    - One LD_PRELOAD library instead of multiple
@@ -113,13 +200,13 @@ Achieve 4-6x performance improvement for llama.cpp inference on AMD Zen 5 proces
    - No fallbacks or compatibility layers
    - Clear error: "llama-zen-turbo requires AMD Zen 5 processor"
 
-### Integration Points
+### Integration points
 
 ```cpp
 // Primary interception points (src/zen5_optimizer.cpp)
 class Zen5Optimizer {
     // Memory allocation (src/memory/hugepage_allocator.cpp)
-    void* mmap(size_t size, ...);           // Huge pages ✅ Implemented
+    void* mmap(size_t size, ...);           // Huge pages (implemented)
     void* malloc(size_t size);              // NUMA-aware allocation
 
     // BLAS operations (Phase 1B)
@@ -135,7 +222,7 @@ class Zen5Optimizer {
 };
 ```
 
-### Zen 5 Architectural Features to Exploit
+### Zen 5 architectural features to exploit
 
 1. **Dual CCD Architecture**
    - Independent memory controllers per CCD
@@ -153,7 +240,7 @@ class Zen5Optimizer {
    - Hardware prefetchers
 
 4. **AOCL Optimizations (Zen 5 Specific)**
-   - **AOCL 5.1 (May 2025)** with Zen 5 optimized BLIS library
+   - **AOCL 5.1** with Zen 5 optimized BLIS library
    - **Zen 5 specific kernels**: Optimized for 256-bit AVX-512 data path
    - **Cache hierarchy aware**: Tuned for 1MB L2 per core, 32MB L3 per CCD
    - **Dual-CCD optimization**: Memory access patterns for dual memory controllers
@@ -163,11 +250,11 @@ class Zen5Optimizer {
      - Reduced memory traffic through optimal blocking
      - AVX-512 VNNI ready for future integration
 
-## Implementation Roadmap
+## Implementation roadmap
 
-### Phase 1: Foundation (Weeks 1-4) ✅ COMPLETED
+### Phase 1: Foundation (weeks 1-4) (completed)
 
-#### Phase 1A: Hugepage Support ✅ COMPLETED
+#### Phase 1A: Hugepage support (completed)
 - Implemented zen5_optimizer library with CPU validation
 - Created modular memory management system
 - Integrated hugepage allocator with configurable thresholds
@@ -177,9 +264,34 @@ class Zen5Optimizer {
   - Concurrent operations (8 threads), stress testing (50 cycles)
   - Fallback scenarios, memory tracking, performance baselines
 
-### Phase 2: Memory Bandwidth Optimizations (Weeks 5-8)
+**Performance Note**: Hugepage support provides the foundation for memory optimizations. Standalone huge pages typically deliver 10-20% TLB efficiency improvement. The full 50% Phase 1 target is achieved when combined with Phase 1B (AOCL BLIS) and subsequent memory access optimizations. Huge pages reduce TLB pressure (7.8M page table entries reduced to 15K entries), enabling other optimizations to work more effectively.
 
-#### Week 5: CCX-Aware Memory Allocation (Experiment 6)
+#### Phase 1B: AOCL BLIS integration (in progress)
+**Goal**: Replace generic OpenBLAS with AMD's Zen 5-optimized BLIS kernels
+**Expected Gain**: 15-25% improvement in GEMM operations
+**Status**: Research and integration phase
+
+**Why AOCL BLIS Helps (Memory Perspective)**:
+- **Not about raw FLOPS**: System has excess CPU cycles (proven by minimal CPU optimization impact)
+- **Cache-aware blocking**: BLIS uses optimal tile sizes for 1MB L2 per core, 32MB L3 per CCD
+- **Reduced memory traffic**: Better blocking = higher cache hit rate = less bandwidth consumption
+- **Dual-CCD awareness**: Memory access patterns optimized for dual memory controllers
+- **Zen 5 specific tuning**: `BLIS_ARCH_TYPE=zen5` enables architecture-specific optimizations
+
+**Implementation Approach**:
+```cpp
+// Intercept cblas_sgemm and route to AOCL BLIS
+extern "C" void cblas_sgemm(...) {
+    // Use AOCL BLIS with Zen 5 optimizations
+    bli_sgemm(...);  // Zen 5 optimized kernel
+}
+```
+
+**Key Insight**: AOCL BLIS is a **memory optimization** that improves cache locality and reduces bandwidth pressure, not just a compute speedup. This is why it helps despite excess CPU capacity.
+
+### Phase 2: Memory bandwidth optimizations (weeks 5-8)
+
+#### Week 5: CCX-aware memory allocation (experiment 6)
 ```cpp
 // Distribute memory across both CCDs
 void* allocate_interleaved(size_t size) {
@@ -192,7 +304,7 @@ void* allocate_interleaved(size_t size) {
 ```
 - **Expected gain**: 5-10% additional
 
-#### Week 6: Layer-Ahead Prefetch (Experiment 1)
+#### Week 6: Layer-ahead prefetch (experiment 1)
 ```cpp
 // Prefetch next layer while computing current
 void prefetch_next_layer(int current_layer) {
@@ -207,43 +319,45 @@ void prefetch_next_layer(int current_layer) {
 ```
 - **Expected gain**: 8-12% additional
 
-#### Week 7: Mixed Huge Pages (Experiment 2)
+#### Week 7: Mixed huge pages (experiment 2)
 - 1GB pages for model weights
 - 2MB pages for KV cache
 - 4KB pages for temporary buffers
 - **Expected gain**: 5-8% additional
 
-#### Week 8: Integration Testing
+#### Week 8: Integration testing
 - Combine all memory optimizations
 - Profile and tune parameters
 - **Cumulative gain**: 60-70% over baseline
 
-### Phase 3: Advanced Memory Optimizations (Weeks 9-12)
+### Phase 3: Advanced memory optimizations (weeks 9-12)
 
-#### Week 9: Cache Line Aligned Weight Packing (Experiment 3)
+#### Week 9: Cache line aligned weight packing (experiment 3)
 - Align weights to 64-byte boundaries
 - Eliminate split cache line loads
 - **Expected gain**: 5-10% additional
 
-#### Week 10: Asynchronous Double Buffering (Experiment 7)
+#### Week 10: Asynchronous double buffering (experiment 7)
 - Load layer N+1 while computing layer N
 - Use separate thread for memory operations
 - **Expected gain**: 8-12% additional
 
-#### Week 11: Smart KV Cache Manager (Experiment 8)
+#### Week 11: Smart KV cache manager (experiment 8)
 - Ring buffer for better locality
 - FP16 compression for older entries
 - **Expected gain**: 5-8% additional
 
-#### Week 12: Bandwidth Throttle Manager (Experiment 4)
+#### Week 12: Bandwidth throttle manager (experiment 4)
 - Prevent memory controller saturation
 - Strategic pauses for queue management
 - **Expected gain**: 3-7% additional
 - **Cumulative gain**: 80-100% over baseline
 
-### Phase 4: VNNI Acceleration for Quantized Models (Weeks 13-16)
+### Phase 4: VNNI acceleration for quantized models (weeks 13-16)
 
-#### Week 13-14: VNNI Kernel Implementation (Experiment 9)
+**Baseline Clarification**: VNNI provides 200-300% speedup on top of optimized Q8 models (35-40 tok/s), not stock llama.cpp. Experimental research showing 10 tok/s baselines measured unoptimized Q8 with dequantization overhead. This phase applies VNNI to already-optimized models from Phases 1-3.
+
+#### Week 13-14: VNNI kernel implementation (experiment 9)
 ```cpp
 // Direct INT8 computation without dequantization
 void vnni_int8_gemm(const int8_t* A, const int8_t* B,
@@ -262,196 +376,75 @@ void vnni_int8_gemm(const int8_t* A, const int8_t* B,
 }
 ```
 
-#### Week 15: Quantization Format Support
+#### Week 15: Quantization format support
 - Q8_0, Q4_0 format detection
 - Scale factor handling
 - Fallback for unsupported formats
 
-#### Week 16: Integration and Validation
+#### Week 16: Integration and validation
 - Combine VNNI with memory optimizations
 - Extensive accuracy testing
 - **Expected gain**: 200-400% for quantized models
 
-### Phase 5: Advanced Compute Optimizations (Weeks 17-20)
+### Phase 5: Advanced compute optimizations (weeks 17-20)
 
-#### Week 17-18: Weight Compression with AVX-512 (Experiment 5)
+#### Week 17-18: Weight compression with AVX-512 (experiment 5)
 - Delta encoding for weights
 - On-the-fly decompression
 - **Expected gain**: 10-15% additional
 
-#### Week 19: Infinity Fabric Optimization
+#### Week 19: Infinity Fabric optimization
 - Tune CCD-to-CCD communication
 - Optimize cross-CCD data sharing
 - **Expected gain**: 5-10% additional
 
-#### Week 20: Final Integration and Polish
+#### Week 20: Final integration and polish
 - Complete feature integration
 - Performance validation
 - Documentation and release
 - **Final target**: 300-500% improvement for quantized models
 
-## Performance Projections
+## Performance projections
 
-### Progressive Performance Gains
+**Note**: The following projections represent optimistic targets based on theoretical analysis and experimental research. Conservative estimates suggest 50-70% of these gains are achievable. Actual results depend on model size, quantization format, and workload characteristics.
+
+### Progressive performance gains
 
 | Phase | Optimization | FP32 Gain | Q8 Gain | Cumulative FP32 | Cumulative Q8 |
 |-------|-------------|-----------|---------|-----------------|---------------|
-| Baseline | Stock llama.cpp | - | - | 35 tok/s | 35 tok/s |
-| Phase 1 | Hugepages | 50% | 50% | 52 tok/s | 52 tok/s |
-| Phase 2 | Memory Optimizations | 30% | 30% | 68 tok/s | 68 tok/s |
-| Phase 3 | Advanced Memory | 25% | 25% | 85 tok/s | 85 tok/s |
-| Phase 4 | VNNI Acceleration | 0% | 200% | 85 tok/s | 255 tok/s |
-| Phase 5 | Advanced Compute | 15% | 30% | 98 tok/s | 330 tok/s |
+| Baseline | BIOS-optimized llama.cpp | - | - | 35 tok/s | 35 tok/s |
+| Phase 1A | Hugepages (foundation) | 10-20% | 10-20% | 38-42 tok/s | 38-42 tok/s |
+| Phase 1B | AOCL BLIS | 15-25% | 15-25% | 44-53 tok/s | 44-53 tok/s |
+| Phase 2 | Memory Optimizations | 20-30% | 20-30% | 53-69 tok/s | 53-69 tok/s |
+| Phase 3 | Advanced Memory | 15-25% | 15-25% | 61-86 tok/s | 61-86 tok/s |
+| Phase 4 | VNNI Acceleration | 0% | 200-300% | 61-86 tok/s | 183-344 tok/s |
+| Phase 5 | Advanced Compute | 10-20% | 20-40% | 67-103 tok/s | 220-482 tok/s |
 
-### Model Size Impact
+**Projected Outcomes**:
+- **FP32 models**: 67-103 tok/s (1.9-2.9× improvement over baseline)
+- **Q8 models**: 220-482 tok/s (6.3-13.8× improvement over baseline)
+- **Key multiplier**: VNNI acceleration for quantized models provides the largest gains
 
-| Model Size | Baseline | Optimized FP32 | Optimized Q8 | Speedup |
-|-----------|----------|----------------|--------------|---------|
-| 7B | 45 tok/s | 126 tok/s | 450 tok/s | 10x |
-| 13B | 28 tok/s | 78 tok/s | 280 tok/s | 10x |
-| 30B | 15 tok/s | 42 tok/s | 150 tok/s | 10x |
-| 70B | 6 tok/s | 17 tok/s | 60 tok/s | 10x |
+## Technical validation
 
-## Success Metrics
-
-### Performance Goals
-- **Minimum Success**: 50% improvement for FP32 models
-- **Target Goal**: 100% improvement for FP32, 300% for INT8
-- **Stretch Goal**: 150% for FP32, 500% for INT8
-
-### Adoption Metrics
-- **GitHub Stars**: 1000+ within first year
-- **Downloads**: 10,000+ monthly active users
-- **Benchmarks**: Featured in major LLM performance comparisons
-- **Integration**: Adopted by at least 3 major projects
-
-### Technical Validation
 - **Accuracy**: Bit-exact results with original implementation
 - **Stability**: 24-hour continuous operation without issues
 - **Compatibility**: Support for all major quantization formats
 - **Zen 5 Required**: No support for other architectures
 
-## Marketing and Outreach Strategy
+## Dependencies
 
-### Technical Blog Series
-1. **"The Foundation: AOCL and Huge Pages"** - Week 4
-2. **"AOCL BLIS vs OpenBLAS: AMD's Secret Weapon"** - Week 8
-3. **"Taming the Beast: Optimizing Dual-CCD Architectures"** - Week 12
-4. **"VNNI Revolution: 4x Speedup for Quantized Models"** - Week 16
-5. **"500% Faster: The Complete Optimization Journey"** - Week 20
-
-### Benchmark Publications
-- Public benchmark dashboard with real-time results
-- Reproducible benchmark scripts
-- Comparison with vLLM, TensorRT-LLM
-- Cost per token analysis
-
-### Community Engagement
-- AMD Developer Forums announcement
-- llama.cpp GitHub discussions
-- HackerNews launch with technical deep-dive
-- Conference talks (Hot Chips, ISCA)
-
-## Risk Analysis and Mitigation
-
-### Technical Risks
-
-| Risk | Probability | Impact | Mitigation |
-|------|------------|--------|------------|
-| llama.cpp API changes | High | Medium | Multiple interception points, version detection |
-| Numerical instability | Medium | High | Extensive validation suite, gradual rollout |
-| VNNI compatibility issues | Low | Medium | Zen 5 has full VNNI support |
-| Memory allocation failures | Low | High | Clear error messages, configuration options |
-
-### Strategic Risks
-- **AMD changes direction**: Continue supporting Zen 5 specifically
-- **llama.cpp implements similar**: Our Zen 5 focus remains unique
-- **Performance gains don't materialize**: Already validated 26% gain from BIOS, rest is upside
-
-## Long-term Vision
-
-### Year 1: Establish Leadership
-- Complete all optimization phases
-- Build community of users
-- Establish benchmark authority
-- Engage with AMD DevRel
-
-### Year 2: Expand Ecosystem
-- Deeper Zen 5 optimizations and tuning
-- Support for Zen 6 (when available)
-- MI300 APU optimizations
-- Distributed inference support
-- Commercial support offerings
-
-### Year 3: Industry Standard
-- AMD official endorsement
-- Integration into major frameworks
-- Reference implementation status
-- Consulting and training services
-
-### Potential Exit Strategies
-1. **AMD Acquisition**: Become official AMD inference solution
-2. **Open Source Success**: Become de facto standard for CPU inference
-3. **Commercial Pivot**: Enterprise support and optimization services
-4. **Technology Licensing**: License optimizations to cloud providers
-
-## Resource Requirements
-
-### Development Resources
-- **Time**: 20 weeks of focused development
-- **Hardware**: Already available (Ryzen 9950X + RTX 5090)
-- **Software**: BLIS, development tools (free/open source)
-- **Testing**: Various model sizes and quantizations
-
-### External Dependencies
-- **AOCL 5.1**: AMD's latest Optimized CPU Libraries (May 2025) with Zen 5 optimized BLIS
+- **AOCL 5.1**: AMD Optimized CPU Libraries with Zen 5 optimized BLIS
 - **llama.cpp**: Target application (referenced via ai-experiments submodule)
-- **hugepage support**: Linux kernel feature ✅ Implemented
+- **hugepage support**: Linux kernel feature (implemented)
 - **AVX-512**: CPU instruction set
 
-## Call to Action
+## Current status
 
-### Immediate Actions (Week 0) ✅ COMPLETED
-1. ✅ Tagged v1.0.0 release of ai-experiments repository
-2. ✅ Created llama-zen-turbo repository
-3. ✅ Set up development environment
-4. ✅ Implemented Phase 1A hugepage support
-5. ✅ Created comprehensive test suite (10 tests, 100% Phase 1A coverage)
-6. 🔄 AOCL integration research in progress
-
-### Month 1 Milestone
-- ✅ Packaged hugepage optimizer (Phase 1A complete)
-- ✅ Comprehensive test suite with stress, concurrency, and performance testing
-- 🔄 Working AOCL 5.1 BLIS integration with Zen 5 kernels (Phase 1B)
-- ⏳ 50% performance improvement demonstrated
-- ⏳ First blog post published
-
-### Month 3 Milestone
-- All memory optimizations complete
-- 100% improvement for FP32
-- Community awareness building
-- AMD DevRel engagement
-
-### Month 5 Milestone
-- VNNI acceleration complete
-- 400% improvement for INT8
-- Production-ready release
-- Major announcement campaign
-
-## Conclusion
-
-This project represents a unique opportunity to:
-1. **Push hardware to its limits** using every available feature
-2. **Solve a real problem** that affects thousands of users
-3. **Establish technical leadership** in CPU optimization
-4. **Create lasting value** for the AI community
-
-The combination of proven techniques (hugepages), Zen 5-specific optimizations (AOCL 5.1 BLIS, dual-CCD), and revolutionary improvements (VNNI) positions this project to redefine what's possible with CPU inference on AMD's latest architecture.
-
-With 26% improvement from BIOS optimizations already proven and clear paths to 400%+ gains, this isn't speculation—it's engineering.
+- Phase 1A (hugepage support) completed
+- Comprehensive test suite implemented (10 tests, 100% Phase 1A coverage)
+- Phase 1B (AOCL 5.1 BLIS integration) in progress
 
 ---
 
-*"We choose to optimize llama.cpp on Zen 5, not because it is easy, but because it is hard."*
-
-**Next Step**: Create the repository and begin Phase 1.
+*Last Updated: 2025-10-03*
