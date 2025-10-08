@@ -1,0 +1,58 @@
+version: '3.9'
+
+services:
+  llama-zen5:
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - IPC_LOCK
+    deploy:
+      resources:
+        limits:
+          cpus: '12'
+          memory: 96G # Increased for single high-performance instance
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.zen5
+    container_name: llama-zen5 # Single latency-optimized CPU inference with Zen 5 optimizations
+    restart: unless-stopped
+    cpuset: "0-11"
+    environment:
+      - SERVER_PORT=8001
+      # Model path for inference
+      - MODEL_PATH=${LLAMA_ZEN5_MODEL}
+      - THREADS=12 # 12 threads for optimal performance
+      - THREADS_BATCH=12
+    ports:
+      # API port binding
+      - "127.0.0.1:8001:8001"
+    read_only: true
+    volumes:
+      # Model storage mount
+      - /mnt/ai-data/models/:/app/models:ro
+      # Log storage
+      - ./logs/zen5:/app/logs
+    networks:
+      - ai-network
+    healthcheck:
+      # Service health monitoring
+      test: ["CMD", "curl", "-f", "http://localhost:8001/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s # Give the CPU model time to load into RAM
+
+# Service network
+networks:
+  ai-network:
+    driver: bridge
+    internal: false # Set to false to allow pulling images, can be true in production
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
